@@ -1,38 +1,34 @@
-from fastapi import FastAPI
 import httpx
-import uvicorn
 import logging
+from fastapi import FastAPI
 
-# 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 1. 轨迹流动（硅基流动）信息
-SILICONFLOW_API_KEY = "aip-key"
-MODEL_NAME = "模型名字"
+# 你的硅基流动配置
+SILICONFLOW_API_KEY = "sk-qytibunnzsjrpqbpjwffowaqsstrhfwvwoxiwfmucbkcqtnh"  # 替换成你自己的Key
+MODEL_NAME = "THUDM/GLM-Z1-9B-0414"
 BASE_URL = "https://api.siliconflow.cn/v1"
 
-# 2. 启动本地服务
 app = FastAPI(title="本地轨迹AI题库", version="1.0")
 
 
-# 3. OCS请求接口
 @app.get("/query")
 async def query(title: str, options: str = "", type: str = ""):
     logger.info(f"收到题目请求: title={title}, options={options}, type={type}")
-    try:
-        # 拼接题目
-        prompt = f"""
-        题目：{title}
-        选项：{options}
-        你现在是一个严格的答题助手，只需要返回正确答案的选项字母（A/B/C/D），
-        不要任何解释、不要多余文字、不要标点符号，只返回一个字母。
-        """
 
-        # 调用轨迹流动AI（修复：超时改成30秒）
+    # 构建prompt，强制AI只返回选项字母
+    prompt = f"""
+    题目：{title}
+    选项：{options}
+    请只回答正确选项的字母（A/B/C/D），不要任何解释、标点或多余文字，只返回一个大写字母。
+    """
+
+    try:
+        # 调用硅基流动API
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                url=f"{BASE_URL}/chat/completions",
+                f"{BASE_URL}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {SILICONFLOW_API_KEY}",
                     "Content-Type": "application/json"
@@ -41,36 +37,39 @@ async def query(title: str, options: str = "", type: str = ""):
                     "model": MODEL_NAME,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
-                    "max_tokens": 10
+                    "stream": False
                 }
             )
+            response.raise_for_status()
+            result = response.json()
 
-        response.raise_for_status()
-        res_json = response.json()
-        logger.info(f"轨迹流动返回: {res_json}")
+            # 提取答案并清理（确保只保留字母）
+            raw_answer = result["choices"][0]["message"]["content"].strip()
+            # 用正则提取字母，避免AI返回多余内容
+            import re
+            answer = re.search(r"[A-D]", raw_answer.upper()).group()
+            logger.info(f"解析到的答案: {answer}")
 
-        answer = res_json["choices"][0]["message"]["content"].strip()
-        logger.info(f"解析到的答案: {answer}")
+            # 【关键】严格按照OCS要求的格式返回数据
+            return {
+                "code": 200,
+                "data": {
+                    "answer": answer
+                }
+            }
 
+    except Exception as e:
+        logger.error(f"请求失败: {str(e)}", exc_info=True)
         return {
-            "code": 200,
+            "code": 500,
             "data": {
-                "answer": answer,
-                "question": title,
-                "ai": True
+                "answer": None
             }
         }
 
-    except httpx.ConnectError:
-        logger.error("无法连接到硅基流动API，请检查网络或代理设置")
-        return {"code": 500, "msg": "无法连接到AI服务"}
-    except httpx.ReadTimeout:
-        logger.error("请求超时，硅基流动API响应过慢")
-        return {"code": 500, "msg": "请求超时，请稍后重试"}
-    except Exception as e:
-        logger.error(f"处理请求出错: {str(e)}", exc_info=True)
-        return {"code": 500, "msg": f"错误：{str(e)}"}
-
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import uvicorn
+
+    # 确保端口是8000，和OCS配置里的url一致
+    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
