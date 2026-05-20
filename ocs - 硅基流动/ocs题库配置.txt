@@ -1,0 +1,10 @@
+[
+    {
+        "name": "本地AI题库",
+        "homepage": "http://localhost:8000",
+        "url": "http://localhost:8000/query?title=${title}&options=${options}&type=${type}",
+        "method": "get",
+        "type": "GM_xmlhttpRequest",
+        "handler": "return (res)=> res.code === 200 ? ['', res.data.answer] : undefined"
+    }
+]
